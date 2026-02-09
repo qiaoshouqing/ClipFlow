@@ -547,16 +547,35 @@ class ClipFlowApp(rumps.App):
             if pinned_clips:
                 for clip_id, content, created_at, pinned in pinned_clips:
                     display = "⭐ " + truncate_text(content)
-                    item = rumps.MenuItem(display, callback=self.make_copy_callback(content))
+                    item = rumps.MenuItem(display, callback=self.make_copy_callback(content, clip_id))
+                    item.add(rumps.MenuItem("取消收藏", callback=self.make_pin_callback(clip_id)))
                     self.menu.add(item)
                 self.menu.add(rumps.separator)
             
             for clip_id, content, created_at, pinned in normal_clips[:8]:
                 display = truncate_text(content)
-                item = rumps.MenuItem(display, callback=self.make_copy_callback(content))
+                item = rumps.MenuItem(display, callback=self.make_copy_callback(content, clip_id))
+                item.add(rumps.MenuItem("☆ 收藏", callback=self.make_pin_callback(clip_id)))
                 self.menu.add(item)
             
             self.menu.add(rumps.separator)
+        
+        # 收藏夹子菜单（只显示最近5条）
+        favorites_menu = rumps.MenuItem("⭐ 收藏夹")
+        if pinned_clips:
+            for clip_id, content, created_at, pinned in pinned_clips[:5]:
+                fav_item = rumps.MenuItem(truncate_text(content), callback=self.make_copy_callback(content, clip_id))
+                fav_item.add(rumps.MenuItem("取消收藏", callback=self.make_pin_callback(clip_id)))
+                favorites_menu.add(fav_item)
+            if len(pinned_clips) > 5:
+                favorites_menu.add(rumps.separator)
+                more_item = rumps.MenuItem(f"查看全部 {len(pinned_clips)} 条收藏...", callback=self.open_history_window)
+                favorites_menu.add(more_item)
+        else:
+            empty_item = rumps.MenuItem("暂无收藏")
+            empty_item.set_callback(None)
+            favorites_menu.add(empty_item)
+        self.menu.add(favorites_menu)
         
         self.menu.add(self.view_all)
         self.menu.add(self.view_web)
@@ -569,7 +588,7 @@ class ClipFlowApp(rumps.App):
         
         # 开机启动选项
         login_enabled = is_login_item()
-        login_title = "✅ 开机启动" if login_enabled else "🚀 开机启动"
+        login_title = "开机启动：已开启" if login_enabled else "开机启动：已关闭"
         self.login_btn.title = login_title
         self.menu.add(self.login_btn)
         
@@ -578,11 +597,18 @@ class ClipFlowApp(rumps.App):
         self.menu.add(rumps.separator)
         self.menu.add(self.quit_btn)
     
-    def make_copy_callback(self, content):
+    def make_copy_callback(self, content, clip_id=None):
         """创建复制回调函数"""
         def callback(sender):
             if set_clipboard(content):
                 self.last_hash = hashlib.md5(content.encode()).hexdigest()
+                # 更新时间戳，让它排到最上面
+                if clip_id:
+                    conn = sqlite3.connect(str(DB_PATH))
+                    conn.execute("UPDATE clips SET created_at = datetime('now', 'localtime') WHERE id = ?", (clip_id,))
+                    conn.commit()
+                    conn.close()
+                self.refresh_menu()
                 rumps.notification("ClipFlow", "已复制", truncate_text(content, 50), sound=False)
         return callback
     
