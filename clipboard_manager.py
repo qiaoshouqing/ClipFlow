@@ -11,6 +11,8 @@ import time
 import hashlib
 import subprocess
 import webbrowser
+import sys
+import os
 from datetime import datetime
 from pathlib import Path
 import re
@@ -85,6 +87,68 @@ def get_time_ago(timestamp_str):
         return ""
 
 
+def get_app_path():
+    """获取应用程序路径"""
+    if getattr(sys, 'frozen', False):
+        # PyInstaller 打包后
+        return os.path.dirname(os.path.dirname(os.path.dirname(sys.executable)))
+    else:
+        # 开发模式
+        return os.path.abspath(__file__)
+
+
+def is_login_item():
+    """检查是否已设置开机启动"""
+    app_path = get_app_path()
+    try:
+        result = subprocess.run(
+            ['osascript', '-e', f'''
+                tell application "System Events"
+                    get the name of every login item
+                end tell
+            '''],
+            capture_output=True, text=True, timeout=5
+        )
+        return 'ClipFlow' in result.stdout
+    except:
+        return False
+
+
+def add_login_item():
+    """添加开机启动"""
+    app_path = get_app_path()
+    if app_path.endswith('.app'):
+        try:
+            subprocess.run(
+                ['osascript', '-e', f'''
+                    tell application "System Events"
+                        make login item at end with properties {{path:"{app_path}", hidden:false}}
+                    end tell
+                '''],
+                capture_output=True, timeout=5
+            )
+            return True
+        except:
+            return False
+    return False
+
+
+def remove_login_item():
+    """移除开机启动"""
+    try:
+        subprocess.run(
+            ['osascript', '-e', '''
+                tell application "System Events"
+                    delete login item "ClipFlow"
+                end tell
+            '''],
+            capture_output=True, timeout=5
+        )
+        return True
+    except:
+        return False
+
+
 class ClipFlowApp(rumps.App):
     def __init__(self):
         # 使用图标文件
@@ -104,6 +168,7 @@ class ClipFlowApp(rumps.App):
         self.clear_btn = rumps.MenuItem("🗑️ 清空历史", callback=self.clear_history)
         self.separator2 = rumps.separator
         self.toggle_btn = rumps.MenuItem("⏸️ 暂停监控", callback=self.toggle_monitoring)
+        self.login_btn = rumps.MenuItem("🚀 开机启动", callback=self.toggle_login_item)
         self.separator3 = rumps.separator
         self.quit_btn = rumps.MenuItem("退出", callback=rumps.quit_application)
         
@@ -205,6 +270,12 @@ class ClipFlowApp(rumps.App):
         self.toggle_btn.title = toggle_title
         self.menu.add(self.toggle_btn)
         
+        # 开机启动选项
+        login_enabled = is_login_item()
+        login_title = "✅ 开机启动" if login_enabled else "🚀 开机启动"
+        self.login_btn.title = login_title
+        self.menu.add(self.login_btn)
+        
         self.menu.add(rumps.separator)
         self.menu.add(self.quit_btn)
     
@@ -232,6 +303,18 @@ class ClipFlowApp(rumps.App):
         conn.close()
         self.refresh_menu()
         rumps.notification("ClipFlow", "", "历史已清空", sound=False)
+    
+    def toggle_login_item(self, sender):
+        """切换开机启动"""
+        if is_login_item():
+            remove_login_item()
+            rumps.notification("ClipFlow", "", "已关闭开机启动", sound=False)
+        else:
+            if add_login_item():
+                rumps.notification("ClipFlow", "", "已开启开机启动", sound=False)
+            else:
+                rumps.notification("ClipFlow", "提示", "请将 ClipFlow.app 放入 Applications 文件夹后重试", sound=False)
+        self.refresh_menu()
 
 
 class ClipFlowWebHandler(http.server.SimpleHTTPRequestHandler):
