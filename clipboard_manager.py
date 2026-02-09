@@ -33,7 +33,7 @@ from Foundation import NSObject
 import objc
 
 # 配置
-VERSION = "1.2.0"
+VERSION = "1.3.0"
 DB_PATH = Path.home() / ".clipflow" / "history.db"
 MAX_HISTORY = 100
 CHECK_INTERVAL = 1.0
@@ -162,6 +162,31 @@ def remove_login_item():
         return False
 
 
+def toggle_pin(clip_id):
+    """切换收藏状态"""
+    conn = sqlite3.connect(str(DB_PATH))
+    try:
+        current = conn.execute("SELECT pinned FROM clips WHERE id = ?", (clip_id,)).fetchone()
+        if current:
+            new_state = 0 if current[0] else 1
+            conn.execute("UPDATE clips SET pinned = ? WHERE id = ?", (new_state, clip_id))
+            conn.commit()
+            return new_state
+    finally:
+        conn.close()
+    return None
+
+
+def delete_clip(clip_id):
+    """删除剪贴板记录"""
+    conn = sqlite3.connect(str(DB_PATH))
+    try:
+        conn.execute("DELETE FROM clips WHERE id = ?", (clip_id,))
+        conn.commit()
+    finally:
+        conn.close()
+
+
 class ClipFlowTableDelegate(NSObject):
     """TableView 数据源和代理"""
     
@@ -171,6 +196,7 @@ class ClipFlowTableDelegate(NSObject):
             return None
         self.clips = []
         self.on_copy = None
+        self.on_refresh = None
         return self
     
     def numberOfRowsInTableView_(self, tableView):
@@ -185,28 +211,87 @@ class ClipFlowTableDelegate(NSObject):
         
         identifier = column.identifier()
         
-        cell = tableView.makeViewWithIdentifier_owner_(identifier, self)
-        if cell is None:
-            cell = NSTextField.alloc().initWithFrame_(NSMakeRect(0, 0, 100, 24))
-            cell.setIdentifier_(identifier)
-            cell.setBordered_(False)
-            cell.setEditable_(False)
-            cell.setBackgroundColor_(NSColor.clearColor())
-            cell.setLineBreakMode_(NSLineBreakByTruncatingTail)
-        
         if identifier == "time":
+            cell = tableView.makeViewWithIdentifier_owner_(identifier, self)
+            if cell is None:
+                cell = NSTextField.alloc().initWithFrame_(NSMakeRect(0, 0, 70, 24))
+                cell.setIdentifier_(identifier)
+                cell.setBordered_(False)
+                cell.setEditable_(False)
+                cell.setBackgroundColor_(NSColor.clearColor())
             cell.setStringValue_(get_time_ago(created_at))
             cell.setTextColor_(NSColor.secondaryLabelColor())
             cell.setFont_(NSFont.monospacedSystemFontOfSize_weight_(11, 0.0))
+            return cell
+        
         elif identifier == "content":
-            preview = content.replace('\n', ' ↵ ')[:100]
+            cell = tableView.makeViewWithIdentifier_owner_(identifier, self)
+            if cell is None:
+                cell = NSTextField.alloc().initWithFrame_(NSMakeRect(0, 0, 280, 24))
+                cell.setIdentifier_(identifier)
+                cell.setBordered_(False)
+                cell.setEditable_(False)
+                cell.setBackgroundColor_(NSColor.clearColor())
+                cell.setLineBreakMode_(NSLineBreakByTruncatingTail)
+            preview = content.replace('\n', ' ↵ ')[:80]
             if pinned:
-                preview = "📌 " + preview
+                preview = "⭐ " + preview
             cell.setStringValue_(preview)
             cell.setTextColor_(NSColor.labelColor())
             cell.setFont_(NSFont.systemFontOfSize_(13))
+            return cell
         
-        return cell
+        elif identifier == "actions":
+            cell = tableView.makeViewWithIdentifier_owner_(identifier, self)
+            if cell is None:
+                cell = NSView.alloc().initWithFrame_(NSMakeRect(0, 0, 100, 28))
+                cell.setIdentifier_(identifier)
+                
+                # 收藏按钮
+                pinBtn = NSButton.alloc().initWithFrame_(NSMakeRect(0, 2, 40, 24))
+                pinBtn.setBezelStyle_(NSBezelStyleRounded)
+                pinBtn.setTag_(1)
+                cell.addSubview_(pinBtn)
+                
+                # 删除按钮
+                delBtn = NSButton.alloc().initWithFrame_(NSMakeRect(45, 2, 40, 24))
+                delBtn.setBezelStyle_(NSBezelStyleRounded)
+                delBtn.setTitle_("删除")
+                delBtn.setTag_(2)
+                cell.addSubview_(delBtn)
+            
+            # 更新按钮状态
+            for subview in cell.subviews():
+                if subview.tag() == 1:
+                    subview.setTitle_("取消" if pinned else "收藏")
+                    subview.setTarget_(self)
+                    subview.setAction_(objc.selector(self.pinClicked_, signature=b'v@:@'))
+                    subview.cell().setRepresentedObject_(clip_id)
+                elif subview.tag() == 2:
+                    subview.setTarget_(self)
+                    subview.setAction_(objc.selector(self.deleteClicked_, signature=b'v@:@'))
+                    subview.cell().setRepresentedObject_(clip_id)
+            
+            return cell
+        
+        return None
+    
+    def pinClicked_(self, sender):
+        clip_id = sender.cell().representedObject()
+        if clip_id:
+            new_state = toggle_pin(clip_id)
+            if self.on_refresh:
+                self.on_refresh()
+            msg = "已收藏" if new_state else "已取消收藏"
+            rumps.notification("ClipFlow", "", msg, sound=False)
+    
+    def deleteClicked_(self, sender):
+        clip_id = sender.cell().representedObject()
+        if clip_id:
+            delete_clip(clip_id)
+            if self.on_refresh:
+                self.on_refresh()
+            rumps.notification("ClipFlow", "", "已删除", sound=False)
     
     def tableViewSelectionDidChange_(self, notification):
         tableView = notification.object()
@@ -243,7 +328,7 @@ class ClipFlowWindow:
             return
         
         # 创建窗口
-        frame = NSMakeRect(0, 0, 500, 400)
+        frame = NSMakeRect(0, 0, 580, 420)
         style = NSWindowStyleMaskTitled | NSWindowStyleMaskClosable | NSWindowStyleMaskResizable
         self.window = NSWindow.alloc().initWithContentRect_styleMask_backing_defer_(
             frame, style, NSBackingStoreBuffered, False
@@ -251,7 +336,7 @@ class ClipFlowWindow:
         self.window.setTitle_(f"ClipFlow v{VERSION}")
         self.window.center()
         self.window.setLevel_(NSFloatingWindowLevel)
-        self.window.setMinSize_((400, 300))
+        self.window.setMinSize_((500, 300))
         
         # 毛玻璃背景
         contentView = self.window.contentView()
@@ -262,7 +347,7 @@ class ClipFlowWindow:
         self.window.setContentView_(visualEffect)
         
         # 创建 TableView
-        scrollFrame = NSMakeRect(10, 10, 480, 380)
+        scrollFrame = NSMakeRect(10, 10, 560, 400)
         scrollView = NSScrollView.alloc().initWithFrame_(scrollFrame)
         scrollView.setAutoresizingMask_(18)
         scrollView.setHasVerticalScroller_(True)
@@ -282,13 +367,20 @@ class ClipFlowWindow:
         
         # 内容列
         contentCol = NSTableColumn.alloc().initWithIdentifier_("content")
-        contentCol.setWidth_(400)
+        contentCol.setWidth_(350)
         contentCol.headerCell().setStringValue_("内容")
         self.table.addTableColumn_(contentCol)
+        
+        # 操作列
+        actionsCol = NSTableColumn.alloc().initWithIdentifier_("actions")
+        actionsCol.setWidth_(100)
+        actionsCol.headerCell().setStringValue_("操作")
+        self.table.addTableColumn_(actionsCol)
         
         # 设置代理
         self.delegate = ClipFlowTableDelegate.alloc().init()
         self.delegate.on_copy = self.on_clip_copied
+        self.delegate.on_refresh = self.refresh_data
         self.table.setDelegate_(self.delegate)
         self.table.setDataSource_(self.delegate)
         
