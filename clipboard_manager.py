@@ -34,7 +34,7 @@ from Foundation import NSObject
 import objc
 
 # 配置
-VERSION = "1.5.0"
+VERSION = "1.5.1"
 DB_PATH = Path.home() / ".clipflow" / "history.db"
 MAX_HISTORY = 100
 CHECK_INTERVAL = 1.0
@@ -246,7 +246,7 @@ class ClipFlowTableDelegate(NSObject):
                 contentLabel.setBackgroundColor_(NSColor.clearColor())
                 contentLabel.setLineBreakMode_(NSLineBreakByTruncatingTail)
                 contentLabel.setFont_(NSFont.systemFontOfSize_(13))
-                contentLabel.setTextColor_(NSColor.whiteColor())
+                contentLabel.setTextColor_(NSColor.blackColor())
                 cell.addSubview_(contentLabel)
             
             # 更新内容
@@ -379,27 +379,24 @@ class ClipFlowWindow:
         self.window.setLevel_(NSFloatingWindowLevel)
         self.window.setMinSize_((500, 400))
         
-        # 强制深色模式
-        darkAppearance = NSAppearance.appearanceNamed_("NSAppearanceNameVibrantDark")
-        self.window.setAppearance_(darkAppearance)
+        # 浅色模式
+        lightAppearance = NSAppearance.appearanceNamed_("NSAppearanceNameAqua")
+        self.window.setAppearance_(lightAppearance)
         
-        # 深色背景
+        # 浅色背景
         contentView = self.window.contentView()
-        visualEffect = NSVisualEffectView.alloc().initWithFrame_(contentView.bounds())
-        visualEffect.setAutoresizingMask_(18)
-        visualEffect.setBlendingMode_(NSVisualEffectBlendingModeBehindWindow)
-        visualEffect.setMaterial_(NSVisualEffectMaterialDark)
-        self.window.setContentView_(visualEffect)
+        contentView.setWantsLayer_(True)
+        contentView.layer().setBackgroundColor_(NSColor.windowBackgroundColor().CGColor())
         
         # 标题区域
         titleLabel = NSTextField.alloc().initWithFrame_(NSMakeRect(20, 450, 300, 30))
         titleLabel.setStringValue_("📋 剪贴板历史")
         titleLabel.setFont_(NSFont.boldSystemFontOfSize_(20))
-        titleLabel.setTextColor_(NSColor.whiteColor())
+        titleLabel.setTextColor_(NSColor.blackColor())
         titleLabel.setBezeled_(False)
         titleLabel.setEditable_(False)
         titleLabel.setBackgroundColor_(NSColor.clearColor())
-        visualEffect.addSubview_(titleLabel)
+        contentView.addSubview_(titleLabel)
         
         # 统计信息
         self.statsLabel = NSTextField.alloc().initWithFrame_(NSMakeRect(450, 455, 130, 20))
@@ -409,7 +406,7 @@ class ClipFlowWindow:
         self.statsLabel.setEditable_(False)
         self.statsLabel.setAlignment_(2)  # Right align
         self.statsLabel.setBackgroundColor_(NSColor.clearColor())
-        visualEffect.addSubview_(self.statsLabel)
+        contentView.addSubview_(self.statsLabel)
         
         # 创建 TableView
         scrollFrame = NSMakeRect(20, 20, 560, 420)
@@ -445,7 +442,7 @@ class ClipFlowWindow:
         self.table.setDataSource_(self.delegate)
         
         scrollView.setDocumentView_(self.table)
-        visualEffect.addSubview_(scrollView)
+        contentView.addSubview_(scrollView)
         
         self.refresh_data()
         self.window.makeKeyAndOrderFront_(None)
