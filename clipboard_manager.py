@@ -34,7 +34,7 @@ from Foundation import NSObject
 import objc
 
 # 配置
-VERSION = "1.4.0"
+VERSION = "1.5.0"
 DB_PATH = Path.home() / ".clipflow" / "history.db"
 MAX_HISTORY = 100
 CHECK_INTERVAL = 1.0
@@ -584,9 +584,23 @@ class ClipFlowApp(rumps.App):
             for clip_id, content, created_at, pinned in clips:
                 prefix = "⭐ " if pinned else ""
                 display = prefix + truncate_text(content)
+                
+                # 创建带子菜单的项目
                 item = rumps.MenuItem(display)
-                # 用闭包捕获 content
-                item.set_callback(self.make_copy_callback(content))
+                
+                # 子菜单: 复制
+                copy_item = rumps.MenuItem("📋 复制", callback=self.make_copy_callback(content))
+                item.add(copy_item)
+                
+                # 子菜单: 收藏/取消收藏
+                pin_title = "✕ 取消收藏" if pinned else "⭐ 收藏"
+                pin_item = rumps.MenuItem(pin_title, callback=self.make_pin_callback(clip_id))
+                item.add(pin_item)
+                
+                # 子菜单: 删除
+                del_item = rumps.MenuItem("🗑️ 删除", callback=self.make_delete_callback(clip_id))
+                item.add(del_item)
+                
                 self.menu.add(item)
             self.menu.add(rumps.separator)
         
@@ -616,6 +630,23 @@ class ClipFlowApp(rumps.App):
             if set_clipboard(content):
                 self.last_hash = hashlib.md5(content.encode()).hexdigest()
                 rumps.notification("ClipFlow", "已复制", truncate_text(content, 50), sound=False)
+        return callback
+    
+    def make_pin_callback(self, clip_id):
+        """创建收藏回调函数"""
+        def callback(sender):
+            new_state = toggle_pin(clip_id)
+            self.refresh_menu()
+            msg = "已收藏" if new_state else "已取消收藏"
+            rumps.notification("ClipFlow", "", msg, sound=False)
+        return callback
+    
+    def make_delete_callback(self, clip_id):
+        """创建删除回调函数"""
+        def callback(sender):
+            delete_clip(clip_id)
+            self.refresh_menu()
+            rumps.notification("ClipFlow", "", "已删除", sound=False)
         return callback
     
     def open_history_window(self, sender):
