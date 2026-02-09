@@ -175,6 +175,10 @@ class ClipFlowApp(rumps.App):
         # 构建初始菜单
         self.refresh_menu()
         
+        # 默认开启开机启动
+        if not is_login_item():
+            add_login_item()
+        
         # 启动 Web 服务器
         threading.Thread(target=self.start_web_server, daemon=True).start()
     
