@@ -21,6 +21,7 @@ import http.server
 import socketserver
 
 # 配置
+VERSION = "1.1.2"
 DB_PATH = Path.home() / ".clipflow" / "history.db"
 MAX_HISTORY = 100
 CHECK_INTERVAL = 1.0
@@ -250,7 +251,7 @@ class ClipFlowApp(rumps.App):
         self.menu.clear()
         
         count = self.get_clip_count()
-        self.header_item = rumps.MenuItem(f"ClipFlow · {count} 条记录")
+        self.header_item = rumps.MenuItem(f"ClipFlow v{VERSION} · {count} 条记录")
         self.header_item.set_callback(None)
         self.menu.add(self.header_item)
         self.menu.add(rumps.separator)
@@ -412,7 +413,7 @@ class ClipFlowWebHandler(http.server.SimpleHTTPRequestHandler):
 <body>
     <div class="container">
         <header>
-            <h1>📋 ClipFlow</h1>
+            <h1>📋 ClipFlow <span style="font-size:14px;color:#666">v1.1.2</span></h1>
             <span class="stats" id="stats">加载中...</span>
         </header>
         <div class="clip-list" id="clipList"></div>
