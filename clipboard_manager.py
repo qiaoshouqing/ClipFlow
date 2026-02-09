@@ -34,7 +34,7 @@ from Foundation import NSObject
 import objc
 
 # 配置
-VERSION = "1.5.1"
+VERSION = "1.6.0"
 DB_PATH = Path.home() / ".clipflow" / "history.db"
 MAX_HISTORY = 100
 CHECK_INTERVAL = 1.0
@@ -265,57 +265,27 @@ class ClipFlowTableDelegate(NSObject):
         elif identifier == "actions":
             cell = tableView.makeViewWithIdentifier_owner_("actions_cell", self)
             if cell is None:
-                cell = NSView.alloc().initWithFrame_(NSMakeRect(0, 0, 130, 45))
+                cell = NSView.alloc().initWithFrame_(NSMakeRect(0, 0, 60, 45))
                 cell.setIdentifier_("actions_cell")
                 
-                # 复制按钮
-                copyBtn = NSButton.alloc().initWithFrame_(NSMakeRect(0, 10, 35, 25))
-                copyBtn.setBezelStyle_(NSBezelStyleRounded)
-                copyBtn.setTitle_("复制")
-                copyBtn.setTag_(3)
-                copyBtn.setFont_(NSFont.systemFontOfSize_(11))
-                cell.addSubview_(copyBtn)
-                
-                # 收藏按钮
-                pinBtn = NSButton.alloc().initWithFrame_(NSMakeRect(40, 10, 35, 25))
+                # 只保留收藏按钮，弱化显示
+                pinBtn = NSButton.alloc().initWithFrame_(NSMakeRect(10, 12, 40, 22))
                 pinBtn.setBezelStyle_(NSBezelStyleRounded)
                 pinBtn.setTag_(1)
-                pinBtn.setFont_(NSFont.systemFontOfSize_(11))
+                pinBtn.setFont_(NSFont.systemFontOfSize_(12))
                 cell.addSubview_(pinBtn)
-                
-                # 删除按钮
-                delBtn = NSButton.alloc().initWithFrame_(NSMakeRect(80, 10, 35, 25))
-                delBtn.setBezelStyle_(NSBezelStyleRounded)
-                delBtn.setTitle_("删除")
-                delBtn.setTag_(2)
-                delBtn.setFont_(NSFont.systemFontOfSize_(11))
-                cell.addSubview_(delBtn)
             
-            # 更新按钮状态
+            # 更新收藏按钮状态
             for subview in cell.subviews():
-                tag = subview.tag()
-                if tag == 1:
-                    subview.setTitle_("⭐" if not pinned else "✕")
+                if subview.tag() == 1:
+                    subview.setTitle_("★" if pinned else "☆")
                     subview.setTarget_(self)
                     subview.setAction_(objc.selector(self.pinClicked_, signature=b'v@:@'))
                     subview.cell().setRepresentedObject_(clip_id)
-                elif tag == 2:
-                    subview.setTarget_(self)
-                    subview.setAction_(objc.selector(self.deleteClicked_, signature=b'v@:@'))
-                    subview.cell().setRepresentedObject_(clip_id)
-                elif tag == 3:
-                    subview.setTarget_(self)
-                    subview.setAction_(objc.selector(self.copyClicked_, signature=b'v@:@'))
-                    subview.cell().setRepresentedObject_(content)
             
             return cell
         
         return None
-    
-    def copyClicked_(self, sender):
-        content = sender.cell().representedObject()
-        if content and set_clipboard(content):
-            rumps.notification("ClipFlow", "已复制", truncate_text(content, 50), sound=False)
     
     def pinClicked_(self, sender):
         clip_id = sender.cell().representedObject()
@@ -325,14 +295,6 @@ class ClipFlowTableDelegate(NSObject):
                 self.on_refresh()
             msg = "已收藏" if new_state else "已取消收藏"
             rumps.notification("ClipFlow", "", msg, sound=False)
-    
-    def deleteClicked_(self, sender):
-        clip_id = sender.cell().representedObject()
-        if clip_id:
-            delete_clip(clip_id)
-            if self.on_refresh:
-                self.on_refresh()
-            rumps.notification("ClipFlow", "", "已删除", sound=False)
     
     def tableViewSelectionDidChange_(self, notification):
         tableView = notification.object()
@@ -426,12 +388,12 @@ class ClipFlowWindow:
         
         # 内容列
         contentCol = NSTableColumn.alloc().initWithIdentifier_("content")
-        contentCol.setWidth_(400)
+        contentCol.setWidth_(480)
         self.table.addTableColumn_(contentCol)
         
-        # 操作列
+        # 收藏列（窄一点）
         actionsCol = NSTableColumn.alloc().initWithIdentifier_("actions")
-        actionsCol.setWidth_(130)
+        actionsCol.setWidth_(60)
         self.table.addTableColumn_(actionsCol)
         
         # 设置代理
@@ -576,29 +538,24 @@ class ClipFlowApp(rumps.App):
         self.menu.add(self.header_item)
         self.menu.add(rumps.separator)
         
-        clips = self.get_recent_clips(8)
+        clips = self.get_recent_clips(10)
         if clips:
-            for clip_id, content, created_at, pinned in clips:
-                prefix = "⭐ " if pinned else ""
-                display = prefix + truncate_text(content)
-                
-                # 创建带子菜单的项目
-                item = rumps.MenuItem(display)
-                
-                # 子菜单: 复制
-                copy_item = rumps.MenuItem("📋 复制", callback=self.make_copy_callback(content))
-                item.add(copy_item)
-                
-                # 子菜单: 收藏/取消收藏
-                pin_title = "✕ 取消收藏" if pinned else "⭐ 收藏"
-                pin_item = rumps.MenuItem(pin_title, callback=self.make_pin_callback(clip_id))
-                item.add(pin_item)
-                
-                # 子菜单: 删除
-                del_item = rumps.MenuItem("🗑️ 删除", callback=self.make_delete_callback(clip_id))
-                item.add(del_item)
-                
+            # 先显示收藏的
+            pinned_clips = [c for c in clips if c[3]]
+            normal_clips = [c for c in clips if not c[3]]
+            
+            if pinned_clips:
+                for clip_id, content, created_at, pinned in pinned_clips:
+                    display = "⭐ " + truncate_text(content)
+                    item = rumps.MenuItem(display, callback=self.make_copy_callback(content))
+                    self.menu.add(item)
+                self.menu.add(rumps.separator)
+            
+            for clip_id, content, created_at, pinned in normal_clips[:8]:
+                display = truncate_text(content)
+                item = rumps.MenuItem(display, callback=self.make_copy_callback(content))
                 self.menu.add(item)
+            
             self.menu.add(rumps.separator)
         
         self.menu.add(self.view_all)
@@ -636,14 +593,6 @@ class ClipFlowApp(rumps.App):
             self.refresh_menu()
             msg = "已收藏" if new_state else "已取消收藏"
             rumps.notification("ClipFlow", "", msg, sound=False)
-        return callback
-    
-    def make_delete_callback(self, clip_id):
-        """创建删除回调函数"""
-        def callback(sender):
-            delete_clip(clip_id)
-            self.refresh_menu()
-            rumps.notification("ClipFlow", "", "已删除", sound=False)
         return callback
     
     def open_history_window(self, sender):
