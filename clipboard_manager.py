@@ -27,13 +27,14 @@ from AppKit import (
     NSTableColumn, NSTextField, NSButton, NSBezelStyleRounded, NSView,
     NSMakeRect, NSColor, NSFont, NSLineBreakByTruncatingTail,
     NSTextFieldCell, NSApp, NSFloatingWindowLevel, NSVisualEffectView,
-    NSVisualEffectBlendingModeBehindWindow, NSVisualEffectMaterialHUDWindow
+    NSVisualEffectBlendingModeBehindWindow, NSVisualEffectMaterialDark,
+    NSAppearance, NSBox, NSBoxCustom
 )
 from Foundation import NSObject
 import objc
 
 # 配置
-VERSION = "1.3.0"
+VERSION = "1.4.0"
 DB_PATH = Path.home() / ".clipflow" / "history.db"
 MAX_HISTORY = 100
 CHECK_INTERVAL = 1.0
@@ -211,70 +212,110 @@ class ClipFlowTableDelegate(NSObject):
         
         identifier = column.identifier()
         
-        if identifier == "time":
-            cell = tableView.makeViewWithIdentifier_owner_(identifier, self)
+        if identifier == "content":
+            # 创建卡片式容器
+            cell = tableView.makeViewWithIdentifier_owner_("content_card", self)
             if cell is None:
-                cell = NSTextField.alloc().initWithFrame_(NSMakeRect(0, 0, 70, 24))
-                cell.setIdentifier_(identifier)
-                cell.setBordered_(False)
-                cell.setEditable_(False)
-                cell.setBackgroundColor_(NSColor.clearColor())
-            cell.setStringValue_(get_time_ago(created_at))
-            cell.setTextColor_(NSColor.secondaryLabelColor())
-            cell.setFont_(NSFont.monospacedSystemFontOfSize_weight_(11, 0.0))
-            return cell
-        
-        elif identifier == "content":
-            cell = tableView.makeViewWithIdentifier_owner_(identifier, self)
-            if cell is None:
-                cell = NSTextField.alloc().initWithFrame_(NSMakeRect(0, 0, 280, 24))
-                cell.setIdentifier_(identifier)
-                cell.setBordered_(False)
-                cell.setEditable_(False)
-                cell.setBackgroundColor_(NSColor.clearColor())
-                cell.setLineBreakMode_(NSLineBreakByTruncatingTail)
-            preview = content.replace('\n', ' ↵ ')[:80]
-            if pinned:
-                preview = "⭐ " + preview
-            cell.setStringValue_(preview)
-            cell.setTextColor_(NSColor.labelColor())
-            cell.setFont_(NSFont.systemFontOfSize_(13))
+                cell = NSView.alloc().initWithFrame_(NSMakeRect(0, 0, 400, 45))
+                cell.setIdentifier_("content_card")
+                
+                # 时间标签
+                timeLabel = NSTextField.alloc().initWithFrame_(NSMakeRect(10, 28, 100, 14))
+                timeLabel.setTag_(10)
+                timeLabel.setBordered_(False)
+                timeLabel.setEditable_(False)
+                timeLabel.setBackgroundColor_(NSColor.clearColor())
+                timeLabel.setFont_(NSFont.monospacedSystemFontOfSize_weight_(10, 0.0))
+                timeLabel.setTextColor_(NSColor.grayColor())
+                cell.addSubview_(timeLabel)
+                
+                # 收藏图标
+                starLabel = NSTextField.alloc().initWithFrame_(NSMakeRect(380, 28, 20, 14))
+                starLabel.setTag_(11)
+                starLabel.setBordered_(False)
+                starLabel.setEditable_(False)
+                starLabel.setBackgroundColor_(NSColor.clearColor())
+                starLabel.setFont_(NSFont.systemFontOfSize_(12))
+                cell.addSubview_(starLabel)
+                
+                # 内容标签
+                contentLabel = NSTextField.alloc().initWithFrame_(NSMakeRect(10, 5, 380, 22))
+                contentLabel.setTag_(12)
+                contentLabel.setBordered_(False)
+                contentLabel.setEditable_(False)
+                contentLabel.setBackgroundColor_(NSColor.clearColor())
+                contentLabel.setLineBreakMode_(NSLineBreakByTruncatingTail)
+                contentLabel.setFont_(NSFont.systemFontOfSize_(13))
+                contentLabel.setTextColor_(NSColor.whiteColor())
+                cell.addSubview_(contentLabel)
+            
+            # 更新内容
+            for subview in cell.subviews():
+                tag = subview.tag()
+                if tag == 10:
+                    subview.setStringValue_(get_time_ago(created_at))
+                elif tag == 11:
+                    subview.setStringValue_("⭐" if pinned else "")
+                elif tag == 12:
+                    preview = content.replace('\n', ' ↵ ')[:60]
+                    subview.setStringValue_(preview)
+            
             return cell
         
         elif identifier == "actions":
-            cell = tableView.makeViewWithIdentifier_owner_(identifier, self)
+            cell = tableView.makeViewWithIdentifier_owner_("actions_cell", self)
             if cell is None:
-                cell = NSView.alloc().initWithFrame_(NSMakeRect(0, 0, 100, 28))
-                cell.setIdentifier_(identifier)
+                cell = NSView.alloc().initWithFrame_(NSMakeRect(0, 0, 130, 45))
+                cell.setIdentifier_("actions_cell")
+                
+                # 复制按钮
+                copyBtn = NSButton.alloc().initWithFrame_(NSMakeRect(0, 10, 35, 25))
+                copyBtn.setBezelStyle_(NSBezelStyleRounded)
+                copyBtn.setTitle_("复制")
+                copyBtn.setTag_(3)
+                copyBtn.setFont_(NSFont.systemFontOfSize_(11))
+                cell.addSubview_(copyBtn)
                 
                 # 收藏按钮
-                pinBtn = NSButton.alloc().initWithFrame_(NSMakeRect(0, 2, 40, 24))
+                pinBtn = NSButton.alloc().initWithFrame_(NSMakeRect(40, 10, 35, 25))
                 pinBtn.setBezelStyle_(NSBezelStyleRounded)
                 pinBtn.setTag_(1)
+                pinBtn.setFont_(NSFont.systemFontOfSize_(11))
                 cell.addSubview_(pinBtn)
                 
                 # 删除按钮
-                delBtn = NSButton.alloc().initWithFrame_(NSMakeRect(45, 2, 40, 24))
+                delBtn = NSButton.alloc().initWithFrame_(NSMakeRect(80, 10, 35, 25))
                 delBtn.setBezelStyle_(NSBezelStyleRounded)
                 delBtn.setTitle_("删除")
                 delBtn.setTag_(2)
+                delBtn.setFont_(NSFont.systemFontOfSize_(11))
                 cell.addSubview_(delBtn)
             
             # 更新按钮状态
             for subview in cell.subviews():
-                if subview.tag() == 1:
-                    subview.setTitle_("取消" if pinned else "收藏")
+                tag = subview.tag()
+                if tag == 1:
+                    subview.setTitle_("⭐" if not pinned else "✕")
                     subview.setTarget_(self)
                     subview.setAction_(objc.selector(self.pinClicked_, signature=b'v@:@'))
                     subview.cell().setRepresentedObject_(clip_id)
-                elif subview.tag() == 2:
+                elif tag == 2:
                     subview.setTarget_(self)
                     subview.setAction_(objc.selector(self.deleteClicked_, signature=b'v@:@'))
                     subview.cell().setRepresentedObject_(clip_id)
+                elif tag == 3:
+                    subview.setTarget_(self)
+                    subview.setAction_(objc.selector(self.copyClicked_, signature=b'v@:@'))
+                    subview.cell().setRepresentedObject_(content)
             
             return cell
         
         return None
+    
+    def copyClicked_(self, sender):
+        content = sender.cell().representedObject()
+        if content and set_clipboard(content):
+            rumps.notification("ClipFlow", "已复制", truncate_text(content, 50), sound=False)
     
     def pinClicked_(self, sender):
         clip_id = sender.cell().representedObject()
@@ -305,7 +346,7 @@ class ClipFlowTableDelegate(NSObject):
 
 
 class ClipFlowWindow:
-    """原生 macOS 历史窗口"""
+    """原生 macOS 历史窗口 - 深色主题"""
     
     _instance = None
     
@@ -328,7 +369,7 @@ class ClipFlowWindow:
             return
         
         # 创建窗口
-        frame = NSMakeRect(0, 0, 580, 420)
+        frame = NSMakeRect(0, 0, 600, 500)
         style = NSWindowStyleMaskTitled | NSWindowStyleMaskClosable | NSWindowStyleMaskResizable
         self.window = NSWindow.alloc().initWithContentRect_styleMask_backing_defer_(
             frame, style, NSBackingStoreBuffered, False
@@ -336,45 +377,64 @@ class ClipFlowWindow:
         self.window.setTitle_(f"ClipFlow v{VERSION}")
         self.window.center()
         self.window.setLevel_(NSFloatingWindowLevel)
-        self.window.setMinSize_((500, 300))
+        self.window.setMinSize_((500, 400))
         
-        # 毛玻璃背景
+        # 强制深色模式
+        darkAppearance = NSAppearance.appearanceNamed_("NSAppearanceNameVibrantDark")
+        self.window.setAppearance_(darkAppearance)
+        
+        # 深色背景
         contentView = self.window.contentView()
         visualEffect = NSVisualEffectView.alloc().initWithFrame_(contentView.bounds())
-        visualEffect.setAutoresizingMask_(18)  # NSViewWidthSizable | NSViewHeightSizable
+        visualEffect.setAutoresizingMask_(18)
         visualEffect.setBlendingMode_(NSVisualEffectBlendingModeBehindWindow)
-        visualEffect.setMaterial_(NSVisualEffectMaterialHUDWindow)
+        visualEffect.setMaterial_(NSVisualEffectMaterialDark)
         self.window.setContentView_(visualEffect)
         
+        # 标题区域
+        titleLabel = NSTextField.alloc().initWithFrame_(NSMakeRect(20, 450, 300, 30))
+        titleLabel.setStringValue_("📋 剪贴板历史")
+        titleLabel.setFont_(NSFont.boldSystemFontOfSize_(20))
+        titleLabel.setTextColor_(NSColor.whiteColor())
+        titleLabel.setBezeled_(False)
+        titleLabel.setEditable_(False)
+        titleLabel.setBackgroundColor_(NSColor.clearColor())
+        visualEffect.addSubview_(titleLabel)
+        
+        # 统计信息
+        self.statsLabel = NSTextField.alloc().initWithFrame_(NSMakeRect(450, 455, 130, 20))
+        self.statsLabel.setFont_(NSFont.systemFontOfSize_(12))
+        self.statsLabel.setTextColor_(NSColor.grayColor())
+        self.statsLabel.setBezeled_(False)
+        self.statsLabel.setEditable_(False)
+        self.statsLabel.setAlignment_(2)  # Right align
+        self.statsLabel.setBackgroundColor_(NSColor.clearColor())
+        visualEffect.addSubview_(self.statsLabel)
+        
         # 创建 TableView
-        scrollFrame = NSMakeRect(10, 10, 560, 400)
+        scrollFrame = NSMakeRect(20, 20, 560, 420)
         scrollView = NSScrollView.alloc().initWithFrame_(scrollFrame)
         scrollView.setAutoresizingMask_(18)
         scrollView.setHasVerticalScroller_(True)
         scrollView.setBorderType_(0)
         scrollView.setBackgroundColor_(NSColor.clearColor())
+        scrollView.setDrawsBackground_(False)
         
         self.table = NSTableView.alloc().initWithFrame_(scrollView.bounds())
         self.table.setBackgroundColor_(NSColor.clearColor())
-        self.table.setRowHeight_(32)
-        self.table.setSelectionHighlightStyle_(1)  # Regular
-        
-        # 时间列
-        timeCol = NSTableColumn.alloc().initWithIdentifier_("time")
-        timeCol.setWidth_(70)
-        timeCol.headerCell().setStringValue_("时间")
-        self.table.addTableColumn_(timeCol)
+        self.table.setRowHeight_(50)
+        self.table.setSelectionHighlightStyle_(1)
+        self.table.setGridStyleMask_(0)  # No grid lines
+        self.table.setHeaderView_(None)  # 隐藏表头
         
         # 内容列
         contentCol = NSTableColumn.alloc().initWithIdentifier_("content")
-        contentCol.setWidth_(350)
-        contentCol.headerCell().setStringValue_("内容")
+        contentCol.setWidth_(400)
         self.table.addTableColumn_(contentCol)
         
         # 操作列
         actionsCol = NSTableColumn.alloc().initWithIdentifier_("actions")
-        actionsCol.setWidth_(100)
-        actionsCol.headerCell().setStringValue_("操作")
+        actionsCol.setWidth_(130)
         self.table.addTableColumn_(actionsCol)
         
         # 设置代理
@@ -401,6 +461,9 @@ class ClipFlowWindow:
                 FROM clips ORDER BY pinned DESC, created_at DESC LIMIT 50
             """)
             self.delegate.clips = cursor.fetchall()
+            count = conn.execute("SELECT COUNT(*) FROM clips").fetchone()[0]
+            if hasattr(self, 'statsLabel') and self.statsLabel:
+                self.statsLabel.setStringValue_(f"{count} 条记录")
         finally:
             conn.close()
         self.table.reloadData()
@@ -519,7 +582,7 @@ class ClipFlowApp(rumps.App):
         clips = self.get_recent_clips(8)
         if clips:
             for clip_id, content, created_at, pinned in clips:
-                prefix = "📌 " if pinned else ""
+                prefix = "⭐ " if pinned else ""
                 display = prefix + truncate_text(content)
                 item = rumps.MenuItem(display)
                 # 用闭包捕获 content
