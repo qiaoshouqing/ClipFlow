@@ -282,6 +282,8 @@ class ClipFlowApp(rumps.App):
         self.menu.add(self.login_btn)
         
         self.menu.add(rumps.separator)
+        self.menu.add(rumps.MenuItem("⭐ GitHub", callback=self.open_github))
+        self.menu.add(rumps.separator)
         self.menu.add(self.quit_btn)
     
     def make_copy_callback(self, content):
@@ -294,6 +296,9 @@ class ClipFlowApp(rumps.App):
     
     def open_web_history(self, sender):
         webbrowser.open(f"http://127.0.0.1:{WEB_PORT}")
+    
+    def open_github(self, sender):
+        webbrowser.open("https://github.com/qiaoshouqing/ClipFlow")
     
     def toggle_monitoring(self, sender):
         self.monitoring = not self.monitoring
