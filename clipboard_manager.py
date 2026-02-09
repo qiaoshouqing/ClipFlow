@@ -20,8 +20,20 @@ import json
 import http.server
 import socketserver
 
+# PyObjC for native UI
+from AppKit import (
+    NSApplication, NSWindow, NSWindowStyleMaskTitled, NSWindowStyleMaskClosable,
+    NSWindowStyleMaskResizable, NSBackingStoreBuffered, NSScrollView, NSTableView,
+    NSTableColumn, NSTextField, NSButton, NSBezelStyleRounded, NSView,
+    NSMakeRect, NSColor, NSFont, NSLineBreakByTruncatingTail,
+    NSTextFieldCell, NSApp, NSFloatingWindowLevel, NSVisualEffectView,
+    NSVisualEffectBlendingModeBehindWindow, NSVisualEffectMaterialHUDWindow
+)
+from Foundation import NSObject
+import objc
+
 # 配置
-VERSION = "1.1.2"
+VERSION = "1.2.0"
 DB_PATH = Path.home() / ".clipflow" / "history.db"
 MAX_HISTORY = 100
 CHECK_INTERVAL = 1.0
@@ -150,6 +162,161 @@ def remove_login_item():
         return False
 
 
+class ClipFlowTableDelegate(NSObject):
+    """TableView 数据源和代理"""
+    
+    def init(self):
+        self = objc.super(ClipFlowTableDelegate, self).init()
+        if self is None:
+            return None
+        self.clips = []
+        self.on_copy = None
+        return self
+    
+    def numberOfRowsInTableView_(self, tableView):
+        return len(self.clips)
+    
+    def tableView_viewForTableColumn_row_(self, tableView, column, row):
+        if row >= len(self.clips):
+            return None
+        
+        clip = self.clips[row]
+        clip_id, content, created_at, pinned = clip
+        
+        identifier = column.identifier()
+        
+        cell = tableView.makeViewWithIdentifier_owner_(identifier, self)
+        if cell is None:
+            cell = NSTextField.alloc().initWithFrame_(NSMakeRect(0, 0, 100, 24))
+            cell.setIdentifier_(identifier)
+            cell.setBordered_(False)
+            cell.setEditable_(False)
+            cell.setBackgroundColor_(NSColor.clearColor())
+            cell.setLineBreakMode_(NSLineBreakByTruncatingTail)
+        
+        if identifier == "time":
+            cell.setStringValue_(get_time_ago(created_at))
+            cell.setTextColor_(NSColor.secondaryLabelColor())
+            cell.setFont_(NSFont.monospacedSystemFontOfSize_weight_(11, 0.0))
+        elif identifier == "content":
+            preview = content.replace('\n', ' ↵ ')[:100]
+            if pinned:
+                preview = "📌 " + preview
+            cell.setStringValue_(preview)
+            cell.setTextColor_(NSColor.labelColor())
+            cell.setFont_(NSFont.systemFontOfSize_(13))
+        
+        return cell
+    
+    def tableViewSelectionDidChange_(self, notification):
+        tableView = notification.object()
+        row = tableView.selectedRow()
+        if row >= 0 and row < len(self.clips):
+            clip = self.clips[row]
+            content = clip[1]
+            if set_clipboard(content):
+                if self.on_copy:
+                    self.on_copy(content)
+
+
+class ClipFlowWindow:
+    """原生 macOS 历史窗口"""
+    
+    _instance = None
+    
+    def __init__(self):
+        self.window = None
+        self.table = None
+        self.delegate = None
+    
+    @classmethod
+    def shared(cls):
+        if cls._instance is None:
+            cls._instance = cls()
+        return cls._instance
+    
+    def show(self):
+        if self.window is not None:
+            self.window.makeKeyAndOrderFront_(None)
+            self.refresh_data()
+            NSApp.activateIgnoringOtherApps_(True)
+            return
+        
+        # 创建窗口
+        frame = NSMakeRect(0, 0, 500, 400)
+        style = NSWindowStyleMaskTitled | NSWindowStyleMaskClosable | NSWindowStyleMaskResizable
+        self.window = NSWindow.alloc().initWithContentRect_styleMask_backing_defer_(
+            frame, style, NSBackingStoreBuffered, False
+        )
+        self.window.setTitle_(f"ClipFlow v{VERSION}")
+        self.window.center()
+        self.window.setLevel_(NSFloatingWindowLevel)
+        self.window.setMinSize_((400, 300))
+        
+        # 毛玻璃背景
+        contentView = self.window.contentView()
+        visualEffect = NSVisualEffectView.alloc().initWithFrame_(contentView.bounds())
+        visualEffect.setAutoresizingMask_(18)  # NSViewWidthSizable | NSViewHeightSizable
+        visualEffect.setBlendingMode_(NSVisualEffectBlendingModeBehindWindow)
+        visualEffect.setMaterial_(NSVisualEffectMaterialHUDWindow)
+        self.window.setContentView_(visualEffect)
+        
+        # 创建 TableView
+        scrollFrame = NSMakeRect(10, 10, 480, 380)
+        scrollView = NSScrollView.alloc().initWithFrame_(scrollFrame)
+        scrollView.setAutoresizingMask_(18)
+        scrollView.setHasVerticalScroller_(True)
+        scrollView.setBorderType_(0)
+        scrollView.setBackgroundColor_(NSColor.clearColor())
+        
+        self.table = NSTableView.alloc().initWithFrame_(scrollView.bounds())
+        self.table.setBackgroundColor_(NSColor.clearColor())
+        self.table.setRowHeight_(32)
+        self.table.setSelectionHighlightStyle_(1)  # Regular
+        
+        # 时间列
+        timeCol = NSTableColumn.alloc().initWithIdentifier_("time")
+        timeCol.setWidth_(70)
+        timeCol.headerCell().setStringValue_("时间")
+        self.table.addTableColumn_(timeCol)
+        
+        # 内容列
+        contentCol = NSTableColumn.alloc().initWithIdentifier_("content")
+        contentCol.setWidth_(400)
+        contentCol.headerCell().setStringValue_("内容")
+        self.table.addTableColumn_(contentCol)
+        
+        # 设置代理
+        self.delegate = ClipFlowTableDelegate.alloc().init()
+        self.delegate.on_copy = self.on_clip_copied
+        self.table.setDelegate_(self.delegate)
+        self.table.setDataSource_(self.delegate)
+        
+        scrollView.setDocumentView_(self.table)
+        visualEffect.addSubview_(scrollView)
+        
+        self.refresh_data()
+        self.window.makeKeyAndOrderFront_(None)
+        NSApp.activateIgnoringOtherApps_(True)
+    
+    def refresh_data(self):
+        if self.table is None:
+            return
+        conn = sqlite3.connect(str(DB_PATH))
+        try:
+            cursor = conn.execute("""
+                SELECT id, content, created_at, pinned 
+                FROM clips ORDER BY pinned DESC, created_at DESC LIMIT 50
+            """)
+            self.delegate.clips = cursor.fetchall()
+        finally:
+            conn.close()
+        self.table.reloadData()
+    
+    def on_clip_copied(self, content):
+        rumps.notification("ClipFlow", "已复制", truncate_text(content, 50), sound=False)
+
+
 class ClipFlowApp(rumps.App):
     def __init__(self):
         # 使用图标文件
@@ -165,7 +332,8 @@ class ClipFlowApp(rumps.App):
         self.header_item = rumps.MenuItem("ClipFlow", callback=None)
         self.clip_items = []
         self.separator1 = rumps.separator
-        self.view_all = rumps.MenuItem("📖 查看全部历史", callback=self.open_web_history)
+        self.view_all = rumps.MenuItem("📖 查看历史", callback=self.open_history_window)
+        self.view_web = rumps.MenuItem("🌐 网页版", callback=self.open_web_history)
         self.clear_btn = rumps.MenuItem("🗑️ 清空历史", callback=self.clear_history)
         self.separator2 = rumps.separator
         self.toggle_btn = rumps.MenuItem("⏸️ 暂停监控", callback=self.toggle_monitoring)
@@ -268,6 +436,7 @@ class ClipFlowApp(rumps.App):
             self.menu.add(rumps.separator)
         
         self.menu.add(self.view_all)
+        self.menu.add(self.view_web)
         self.menu.add(self.clear_btn)
         self.menu.add(rumps.separator)
         
@@ -293,6 +462,9 @@ class ClipFlowApp(rumps.App):
                 self.last_hash = hashlib.md5(content.encode()).hexdigest()
                 rumps.notification("ClipFlow", "已复制", truncate_text(content, 50), sound=False)
         return callback
+    
+    def open_history_window(self, sender):
+        ClipFlowWindow.shared().show()
     
     def open_web_history(self, sender):
         webbrowser.open(f"http://127.0.0.1:{WEB_PORT}")
